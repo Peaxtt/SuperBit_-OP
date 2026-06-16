@@ -427,3 +427,489 @@ namespace SuperBit {
     }
 
 }
+
+// ─── JBC state variables ────────────────────────────────────────────────────
+let _jbc_imuEnabled: boolean = true
+let _jbc_isTurning: boolean = false
+let _jbc_speedY: number = 0
+let _jbc_correction: number = 0
+let _jbc_currentHeading: number = 0
+let _jbc_targetHeading: number = 0
+let _jbc_integral: number = 0
+let _jbc_lastError: number = 0
+let _jbc_gyroOffset: number = 0
+let _jbc_lastTime: number = input.runningTime()
+let _jbc_headingAccErr: number = 0
+let _jbc_targetServo: number = 75
+let _jbc_currentServo: number = 75
+const MPU_ADDR: number = 104
+let _jbc_Kp_straight: number = 15.0
+let _jbc_Ki_straight: number = 0.01
+let _jbc_Kd_straight: number = 3.0
+let _jbc_Kp_turn: number = 8.0
+let _jbc_Kd_turn: number = 0.5
+let _jbc_msperdeg: number = 6
+
+// ─── JBC namespace ───────────────────────────────────────────────────────────
+//% color="#2196F3" icon=""
+//% groups="['Setup','Movement','Gripper']"
+namespace JBC {
+
+    // ── Background: servo soft-ramp (10 ms) ──────────────────────────────────
+    function _startServoRamp(): void {
+        loops.everyInterval(10, function () {
+            if (_jbc_currentServo < _jbc_targetServo) {
+                _jbc_currentServo += 1
+                SuperBit.Servo2(SuperBit.enServo.S5, _jbc_currentServo)
+            } else if (_jbc_currentServo > _jbc_targetServo) {
+                _jbc_currentServo -= 1
+                SuperBit.Servo2(SuperBit.enServo.S5, _jbc_currentServo)
+            }
+        })
+    }
+
+    // ── Background: gyro PID (10 ms) ─────────────────────────────────────────
+    function _startPID(): void {
+        loops.everyInterval(10, function () {
+            if (!_jbc_imuEnabled) {
+                _jbc_lastTime = input.runningTime()
+                _jbc_correction = 0
+                return
+            }
+            pins.i2cWriteNumber(MPU_ADDR, 71, NumberFormat.UInt8BE, true)
+            let raw = pins.i2cReadNumber(MPU_ADDR, NumberFormat.Int16BE, false)
+
+            let now = input.runningTime()
+            let dt = (now - _jbc_lastTime) / 1000
+            _jbc_lastTime = now
+
+            let dps = (raw - _jbc_gyroOffset) / 131
+            let threshold = _jbc_isTurning ? 0.3 : 1.0
+            if (Math.abs(dps) > threshold) {
+                _jbc_currentHeading += dps * dt
+            }
+
+            if (_jbc_isTurning || _jbc_speedY != 0) {
+                let error = _jbc_targetHeading - _jbc_currentHeading
+                _jbc_integral += error * dt
+
+                let Kp: number
+                let Kd: number
+                let iterm: number
+                if (_jbc_isTurning) {
+                    _jbc_integral = 0
+                    Kp = _jbc_Kp_turn; Kd = _jbc_Kd_turn; iterm = 0
+                } else {
+                    _jbc_integral = Math.constrain(_jbc_integral, -50, 50)
+                    Kp = _jbc_Kp_straight; Kd = _jbc_Kd_straight; iterm = _jbc_integral * _jbc_Ki_straight
+                }
+
+                let derivative = (dt > 0) ? (error - _jbc_lastError) / dt : 0
+                _jbc_correction = error * Kp + iterm + derivative * Kd
+
+                if (_jbc_isTurning) {
+                    let turnErr = Math.abs(_jbc_targetHeading - _jbc_currentHeading)
+                    if (turnErr > 15) {
+                        _jbc_correction = Math.constrain(_jbc_correction, -130, 130)
+                    } else {
+                        _jbc_correction = Math.constrain(_jbc_correction, -70, 70)
+                    }
+                }
+
+                _jbc_lastError = error
+            } else {
+                _jbc_correction = 0
+                _jbc_integral = 0
+                _jbc_lastError = 0
+                _jbc_targetHeading = _jbc_currentHeading
+            }
+        })
+    }
+
+    // ── Background: motor output (forever) ───────────────────────────────────
+    function _startMotorOutput(): void {
+        basic.forever(function () {
+            let left: number
+            let right: number
+            if (_jbc_isTurning) {
+                left = _jbc_correction
+                right = -_jbc_correction
+            } else {
+                left = _jbc_speedY + _jbc_correction
+                right = _jbc_speedY - _jbc_correction
+            }
+
+            let outLeft = -left
+            let outRight = -right
+
+            if (_jbc_isTurning) {
+                if (outLeft > 0 && outLeft < 55) outLeft = 55
+                if (outLeft < 0 && outLeft > -55) outLeft = -55
+                if (outRight > 0 && outRight < 55) outRight = 55
+                if (outRight < 0 && outRight > -55) outRight = -55
+            }
+
+            outLeft = Math.constrain(outLeft, -255, 255)
+            outRight = Math.constrain(outRight, -255, 255)
+
+            SuperBit.MotorRun(SuperBit.enMotors.M3, outLeft)
+            SuperBit.MotorRun(SuperBit.enMotors.M1, outRight)
+        })
+    }
+
+    // ── Background: telemetry (100 ms) ───────────────────────────────────────
+    function _startTelemetry(): void {
+        loops.everyInterval(100, function () {
+            radio.sendValue("cur", Math.round(_jbc_currentHeading))
+            radio.sendValue("tgt", Math.round(_jbc_targetHeading))
+        })
+    }
+
+    // ── Single radio handler: cmd + live PID tuning from Joystick ────────────
+    function _startRadioReceiver(): void {
+        radio.onReceivedValue(function (name: string, value: number) {
+            if (name == "cmd") {
+                if (value == 1) { JBC.turnDegrees(90) }
+                else if (value == 2) { JBC.moveStraight(150, 3000) }
+                else if (value == 3) { JBC.robotStop() }
+            } else if (name == "kp_s") { _jbc_Kp_straight = value }
+            else if (name == "ki_s") { _jbc_Ki_straight = value }
+            else if (name == "kd_s") { _jbc_Kd_straight = value }
+            else if (name == "kp_t") { _jbc_Kp_turn = value }
+            else if (name == "kd_t") { _jbc_Kd_turn = value }
+        })
+    }
+
+    // ── Exported blocks ───────────────────────────────────────────────────────
+
+    /**
+     * เตรียมหุ่นยนต์ JBC: จูน IMU แล้วเริ่มทำงาน
+     */
+    //% block="เตรียมหุ่นยนต์ JBC"
+    //% group="Setup" weight=100
+    export function initRobot(): void {
+        radio.setGroup(67)
+        SuperBit.Servo2(SuperBit.enServo.S5, 75)
+
+        // Wake MPU-6050
+        pins.i2cWriteNumber(MPU_ADDR, 27392, NumberFormat.UInt16BE, false)
+
+        basic.showIcon(IconNames.Asleep)
+        music.playTone(131, music.beat(BeatFraction.Quarter))
+
+        // Calibrate gyro offset (200 samples × 5 ms)
+        let sum = 0
+        for (let i = 0; i < 200; i++) {
+            pins.i2cWriteNumber(MPU_ADDR, 71, NumberFormat.UInt8BE, true)
+            sum += pins.i2cReadNumber(MPU_ADDR, NumberFormat.Int16BE, false)
+            basic.pause(5)
+        }
+        _jbc_gyroOffset = sum / 200
+        _jbc_lastTime = input.runningTime()
+
+        basic.showIcon(IconNames.Happy)
+        music.playTone(523, music.beat(BeatFraction.Eighth))
+
+        _startServoRamp()
+        _startPID()
+        _startMotorOutput()
+        _startTelemetry()
+        _startRadioReceiver()
+    }
+
+    /**
+     * เปิด/ปิด การใช้ IMU (ค่าเริ่มต้น: เปิด)
+     * @param on true = ใช้ IMU, false = ปิด IMU
+     */
+    //% block="เปิดใช้ IMU %on"
+    //% on.shadow="toggleOnOff" on.defl=true
+    //% group="Setup" weight=95
+    export function setImu(on: boolean): void {
+        _jbc_imuEnabled = on
+    }
+
+    /**
+     * เดินตรง ด้วยความเร็วที่กำหนด เป็นเวลากี่มิลลิวินาที
+     * @param speed ความเร็ว 0–255, eg: 150
+     * @param duration_ms เวลา (มิลลิวินาที), eg: 2000
+     */
+    //% block="เดินตรง ความเร็ว %speed เป็นเวลา %duration_ms ms"
+    //% speed.min=0 speed.max=255 speed.defl=150
+    //% duration_ms.min=100 duration_ms.defl=2000
+    //% group="Movement" weight=90
+    export function moveStraight(speed: number, duration_ms: number): void {
+        if (_jbc_imuEnabled) {
+            _jbc_isTurning = false
+            _jbc_targetHeading = _jbc_currentHeading
+            _jbc_integral = 0
+            _jbc_lastError = 0
+            _jbc_speedY = -speed
+            basic.pause(duration_ms)
+            robotStop()
+        } else {
+            SuperBit.MotorRun(SuperBit.enMotors.M3, -speed)
+            SuperBit.MotorRun(SuperBit.enMotors.M1, -speed)
+            basic.pause(duration_ms)
+            robotStop()
+        }
+    }
+
+    /**
+     * หมุน กี่องศา (บวก = ขวา, ลบ = ซ้าย)
+     * @param degrees องศาที่ต้องการหมุน, eg: 90
+     */
+    //% block="หมุน %degrees องศา"
+    //% degrees.min=-360 degrees.max=360 degrees.defl=90
+    //% group="Movement" weight=80
+    export function turnDegrees(degrees: number): void {
+        if (_jbc_imuEnabled) {
+            robotStop()
+            basic.pause(200)
+
+            let compensated = degrees + _jbc_headingAccErr
+            _jbc_targetHeading = _jbc_currentHeading - compensated
+            _jbc_integral = 0
+            _jbc_lastError = 0
+            _jbc_isTurning = true
+
+            let t0 = input.runningTime()
+            while (Math.abs(_jbc_targetHeading - _jbc_currentHeading) > 15) {
+                if (input.runningTime() - t0 > 5000) break
+                basic.pause(10)
+            }
+
+            _jbc_integral = 0
+            _jbc_lastError = 0
+
+            t0 = input.runningTime()
+            while (Math.abs(_jbc_targetHeading - _jbc_currentHeading) > 0.5) {
+                if (input.runningTime() - t0 > 3000) break
+                basic.pause(10)
+            }
+
+            _jbc_headingAccErr = _jbc_targetHeading - _jbc_currentHeading
+            robotStop()
+            basic.pause(200)
+        } else {
+            let dur = Math.abs(degrees) * _jbc_msperdeg
+            if (degrees > 0) {
+                SuperBit.MotorRun(SuperBit.enMotors.M3, -150)
+                SuperBit.MotorRun(SuperBit.enMotors.M1, 150)
+            } else {
+                SuperBit.MotorRun(SuperBit.enMotors.M3, 150)
+                SuperBit.MotorRun(SuperBit.enMotors.M1, -150)
+            }
+            basic.pause(dur)
+            robotStop()
+        }
+    }
+
+    /**
+     * หยุดหุ่นยนต์
+     */
+    //% block="หยุดหุ่นยนต์"
+    //% group="Movement" weight=70
+    export function robotStop(): void {
+        _jbc_speedY = 0
+        _jbc_isTurning = false
+        _jbc_correction = 0
+        SuperBit.MotorRun(SuperBit.enMotors.M3, 0)
+        SuperBit.MotorRun(SuperBit.enMotors.M1, 0)
+    }
+
+    /**
+     * หุบคีม (จับของ)
+     */
+    //% block="หุบคีม (จับของ)"
+    //% group="Gripper" weight=60
+    export function closeGripper(): void {
+        _jbc_targetServo = 40
+    }
+
+    /**
+     * แบคีม (ปล่อยของ)
+     */
+    //% block="แบคีม (ปล่อยของ)"
+    //% group="Gripper" weight=50
+    export function openGripper(): void {
+        _jbc_targetServo = 75
+    }
+
+    // ── PID Tuning blocks ────────────────────────────────────────────────────
+
+    /**
+     * ตั้งค่า PID สำหรับเดินตรง
+     * @param kp eg: 15.0
+     * @param ki eg: 0.01
+     * @param kd eg: 3.0
+     */
+    //% block="ตั้ง PID เดินตรง Kp %kp Ki %ki Kd %kd"
+    //% kp.defl=15.0 ki.defl=0.01 kd.defl=3.0
+    //% group="Tuning" weight=45
+    export function setStraightPID(kp: number, ki: number, kd: number): void {
+        _jbc_Kp_straight = kp
+        _jbc_Ki_straight = ki
+        _jbc_Kd_straight = kd
+    }
+
+    /**
+     * ตั้งค่า PD สำหรับหมุน
+     * @param kp eg: 8.0
+     * @param kd eg: 0.5
+     */
+    //% block="ตั้ง PD หมุน Kp %kp Kd %kd"
+    //% kp.defl=8.0 kd.defl=0.5
+    //% group="Tuning" weight=44
+    export function setTurnPD(kp: number, kd: number): void {
+        _jbc_Kp_turn = kp
+        _jbc_Kd_turn = kd
+    }
+
+    /**
+     * ตั้งเวลาหมุนต่อองศา (ใช้เมื่อปิด IMU)
+     * @param ms_per_deg เวลา ms ต่อ 1 องศา eg: 6
+     */
+    //% block="ตั้งเวลาหมุน %ms_per_deg ms ต่อองศา"
+    //% ms_per_deg.defl=6
+    //% group="Tuning" weight=43
+    export function setTurnRate(ms_per_deg: number): void {
+        _jbc_msperdeg = ms_per_deg
+    }
+
+    /**
+     * อ่านค่า heading ปัจจุบัน (องศา)
+     */
+    //% block="heading ปัจจุบัน"
+    //% group="Tuning" weight=42
+    export function currentHeading(): number {
+        return _jbc_currentHeading
+    }
+
+    /**
+     * รีเซ็ต heading เป็น 0
+     */
+    //% block="รีเซ็ต heading"
+    //% group="Tuning" weight=41
+    export function resetHeading(): void {
+        _jbc_currentHeading = 0
+        _jbc_targetHeading = 0
+        _jbc_headingAccErr = 0
+        _jbc_integral = 0
+        _jbc_lastError = 0
+    }
+
+}
+
+// ─── JBC Joystick namespace ──────────────────────────────────────────────────
+//% color="#E91E63" icon=""
+//% groups="['Control','Tune']"
+namespace JBCJoystick {
+
+    /**
+     * เตรียม Joystick — ตั้ง radio group 67 และเปิด plot อัตโนมัติ
+     * (ค่า cur/tgt จากหุ่นจะแสดงใน MakeCode Data Viewer ทันที)
+     */
+    //% block="เตรียม Joystick"
+    //% group="Control" weight=100
+    export function init(): void {
+        radio.setGroup(67)
+        radio.onReceivedValue(function (name: string, value: number) {
+            serial.writeValue(name, value)
+        })
+    }
+
+    /**
+     * สั่งหมุนขวา 90 องศา
+     */
+    //% block="สั่งหมุนขวา 90°"
+    //% group="Control" weight=90
+    export function cmdTurnRight90(): void {
+        radio.sendValue("cmd", 1)
+        basic.showString("T")
+    }
+
+    /**
+     * สั่งเดินตรง 3 วินาที
+     */
+    //% block="สั่งเดินตรง 3 วิ"
+    //% group="Control" weight=80
+    export function cmdMoveStraight(): void {
+        radio.sendValue("cmd", 2)
+        basic.showString("G")
+    }
+
+    /**
+     * สั่งหยุด
+     */
+    //% block="สั่งหยุด"
+    //% group="Control" weight=70
+    export function cmdStop(): void {
+        radio.sendValue("cmd", 3)
+        basic.showIcon(IconNames.No)
+    }
+
+    /**
+     * ส่งคำสั่งหมายเลขเอง
+     * @param cmd eg: 1
+     */
+    //% block="ส่งคำสั่ง %cmd"
+    //% cmd.defl=1
+    //% group="Control" weight=60
+    export function sendCmd(cmd: number): void {
+        radio.sendValue("cmd", cmd)
+    }
+
+    // ── Live PID tuning — ส่งค่าไปให้หุ่นแบบ real-time ─────────────────────
+    // หุ่นจะอัพเดท PID ทันทีโดยไม่ต้องรีสตาร์ท
+    // plot ใน Data Viewer จะเห็น cur (heading จริง) vs tgt (เป้าหมาย)
+
+    /**
+     * ส่ง Kp เดินตรง ไปให้หุ่น (default 15.0 — ลดถ้าสั่น)
+     */
+    //% block="ส่ง Kp เดินตรง %kp"
+    //% kp.defl=15.0
+    //% group="Tune" weight=59
+    export function tuneKpStraight(kp: number): void {
+        radio.sendValue("kp_s", kp)
+    }
+
+    /**
+     * ส่ง Ki เดินตรง ไปให้หุ่น (default 0.01 — เพิ่มถ้า drift)
+     */
+    //% block="ส่ง Ki เดินตรง %ki"
+    //% ki.defl=0.01
+    //% group="Tune" weight=58
+    export function tuneKiStraight(ki: number): void {
+        radio.sendValue("ki_s", ki)
+    }
+
+    /**
+     * ส่ง Kd เดินตรง ไปให้หุ่น (default 3.0 — เพิ่มถ้าตอบสนองช้า)
+     */
+    //% block="ส่ง Kd เดินตรง %kd"
+    //% kd.defl=3.0
+    //% group="Tune" weight=57
+    export function tuneKdStraight(kd: number): void {
+        radio.sendValue("kd_s", kd)
+    }
+
+    /**
+     * ส่ง Kp หมุน ไปให้หุ่น (default 8.0 — ลดถ้า overshoot)
+     */
+    //% block="ส่ง Kp หมุน %kp"
+    //% kp.defl=8.0
+    //% group="Tune" weight=56
+    export function tuneKpTurn(kp: number): void {
+        radio.sendValue("kp_t", kp)
+    }
+
+    /**
+     * ส่ง Kd หมุน ไปให้หุ่น (default 0.5 — เพิ่มถ้า overshoot)
+     */
+    //% block="ส่ง Kd หมุน %kd"
+    //% kd.defl=0.5
+    //% group="Tune" weight=55
+    export function tuneKdTurn(kd: number): void {
+        radio.sendValue("kd_t", kd)
+    }
+}
