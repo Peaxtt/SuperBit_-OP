@@ -585,7 +585,7 @@ namespace JBC {
     /**
      * เตรียมหุ่นยนต์ JBC: จูน IMU แล้วเริ่มทำงาน
      */
-    //% block="เตรียมหุ่นยนต์ JBC"
+    //% block="initialize JBC robot"
     //% group="Setup" weight=100
     export function initRobot(): void {
         radio.setGroup(67)
@@ -621,7 +621,7 @@ namespace JBC {
      * เปิด/ปิด การใช้ IMU (ค่าเริ่มต้น: เปิด)
      * @param on true = ใช้ IMU, false = ปิด IMU
      */
-    //% block="เปิดใช้ IMU %on"
+    //% block="use IMU %on"
     //% on.shadow="toggleOnOff" on.defl=true
     //% group="Setup" weight=95
     export function setImu(on: boolean): void {
@@ -633,7 +633,7 @@ namespace JBC {
      * @param speed ความเร็ว 0–255, eg: 150
      * @param duration_ms เวลา (มิลลิวินาที), eg: 2000
      */
-    //% block="เดินตรง ความเร็ว %speed เป็นเวลา %duration_ms ms"
+    //% block="move straight speed %speed for %duration_ms ms"
     //% speed.min=0 speed.max=255 speed.defl=150
     //% duration_ms.min=100 duration_ms.defl=2000
     //% group="Movement" weight=90
@@ -658,7 +658,7 @@ namespace JBC {
      * หมุน กี่องศา (บวก = ขวา, ลบ = ซ้าย)
      * @param degrees องศาที่ต้องการหมุน, eg: 90
      */
-    //% block="หมุน %degrees องศา"
+    //% block="turn %degrees degrees"
     //% degrees.min=-360 degrees.max=360 degrees.defl=90
     //% group="Movement" weight=80
     export function turnDegrees(degrees: number): void {
@@ -707,7 +707,7 @@ namespace JBC {
     /**
      * หยุดหุ่นยนต์
      */
-    //% block="หยุดหุ่นยนต์"
+    //% block="stop robot"
     //% group="Movement" weight=70
     export function robotStop(): void {
         _jbc_speedY = 0
@@ -720,7 +720,7 @@ namespace JBC {
     /**
      * หุบคีม (จับของ)
      */
-    //% block="หุบคีม (จับของ)"
+    //% block="close gripper"
     //% group="Gripper" weight=60
     export function closeGripper(): void {
         _jbc_targetServo = 40
@@ -729,7 +729,7 @@ namespace JBC {
     /**
      * แบคีม (ปล่อยของ)
      */
-    //% block="แบคีม (ปล่อยของ)"
+    //% block="open gripper"
     //% group="Gripper" weight=50
     export function openGripper(): void {
         _jbc_targetServo = 75
@@ -743,7 +743,7 @@ namespace JBC {
      * @param ki eg: 0.01
      * @param kd eg: 3.0
      */
-    //% block="ตั้ง PID เดินตรง Kp %kp Ki %ki Kd %kd"
+    //% block="set straight PID Kp %kp Ki %ki Kd %kd"
     //% kp.defl=15.0 ki.defl=0.01 kd.defl=3.0
     //% group="Tuning" weight=45
     export function setStraightPID(kp: number, ki: number, kd: number): void {
@@ -757,7 +757,7 @@ namespace JBC {
      * @param kp eg: 8.0
      * @param kd eg: 0.5
      */
-    //% block="ตั้ง PD หมุน Kp %kp Kd %kd"
+    //% block="set turn PD Kp %kp Kd %kd"
     //% kp.defl=8.0 kd.defl=0.5
     //% group="Tuning" weight=44
     export function setTurnPD(kp: number, kd: number): void {
@@ -769,7 +769,7 @@ namespace JBC {
      * ตั้งเวลาหมุนต่อองศา (ใช้เมื่อปิด IMU)
      * @param ms_per_deg เวลา ms ต่อ 1 องศา eg: 6
      */
-    //% block="ตั้งเวลาหมุน %ms_per_deg ms ต่อองศา"
+    //% block="set turn rate %ms_per_deg ms per degree"
     //% ms_per_deg.defl=6
     //% group="Tuning" weight=43
     export function setTurnRate(ms_per_deg: number): void {
@@ -779,7 +779,7 @@ namespace JBC {
     /**
      * อ่านค่า heading ปัจจุบัน (องศา)
      */
-    //% block="heading ปัจจุบัน"
+    //% block="current heading"
     //% group="Tuning" weight=42
     export function currentHeading(): number {
         return _jbc_currentHeading
@@ -788,7 +788,7 @@ namespace JBC {
     /**
      * รีเซ็ต heading เป็น 0
      */
-    //% block="รีเซ็ต heading"
+    //% block="reset heading"
     //% group="Tuning" weight=41
     export function resetHeading(): void {
         _jbc_currentHeading = 0
@@ -809,7 +809,7 @@ namespace JBCJoystick {
      * เตรียม Joystick — ตั้ง radio group 67 และเปิด plot อัตโนมัติ
      * (ค่า cur/tgt จากหุ่นจะแสดงใน MakeCode Data Viewer ทันที)
      */
-    //% block="เตรียม Joystick"
+    //% block="initialize Joystick"
     //% group="Control" weight=100
     export function init(): void {
         radio.setGroup(67)
@@ -821,7 +821,7 @@ namespace JBCJoystick {
     /**
      * สั่งหมุนขวา 90 องศา
      */
-    //% block="สั่งหมุนขวา 90°"
+    //% block="send turn right 90°"
     //% group="Control" weight=90
     export function cmdTurnRight90(): void {
         radio.sendValue("cmd", 1)
@@ -831,7 +831,7 @@ namespace JBCJoystick {
     /**
      * สั่งเดินตรง 3 วินาที
      */
-    //% block="สั่งเดินตรง 3 วิ"
+    //% block="send move straight 3s"
     //% group="Control" weight=80
     export function cmdMoveStraight(): void {
         radio.sendValue("cmd", 2)
@@ -841,7 +841,7 @@ namespace JBCJoystick {
     /**
      * สั่งหยุด
      */
-    //% block="สั่งหยุด"
+    //% block="send stop"
     //% group="Control" weight=70
     export function cmdStop(): void {
         radio.sendValue("cmd", 3)
@@ -852,7 +852,7 @@ namespace JBCJoystick {
      * ส่งคำสั่งหมายเลขเอง
      * @param cmd eg: 1
      */
-    //% block="ส่งคำสั่ง %cmd"
+    //% block="send command %cmd"
     //% cmd.defl=1
     //% group="Control" weight=60
     export function sendCmd(cmd: number): void {
@@ -866,7 +866,7 @@ namespace JBCJoystick {
     /**
      * ส่ง Kp เดินตรง ไปให้หุ่น (default 15.0 — ลดถ้าสั่น)
      */
-    //% block="ส่ง Kp เดินตรง %kp"
+    //% block="tune straight Kp %kp"
     //% kp.defl=15.0
     //% group="Tune" weight=59
     export function tuneKpStraight(kp: number): void {
@@ -876,7 +876,7 @@ namespace JBCJoystick {
     /**
      * ส่ง Ki เดินตรง ไปให้หุ่น (default 0.01 — เพิ่มถ้า drift)
      */
-    //% block="ส่ง Ki เดินตรง %ki"
+    //% block="tune straight Ki %ki"
     //% ki.defl=0.01
     //% group="Tune" weight=58
     export function tuneKiStraight(ki: number): void {
@@ -886,7 +886,7 @@ namespace JBCJoystick {
     /**
      * ส่ง Kd เดินตรง ไปให้หุ่น (default 3.0 — เพิ่มถ้าตอบสนองช้า)
      */
-    //% block="ส่ง Kd เดินตรง %kd"
+    //% block="tune straight Kd %kd"
     //% kd.defl=3.0
     //% group="Tune" weight=57
     export function tuneKdStraight(kd: number): void {
@@ -896,7 +896,7 @@ namespace JBCJoystick {
     /**
      * ส่ง Kp หมุน ไปให้หุ่น (default 8.0 — ลดถ้า overshoot)
      */
-    //% block="ส่ง Kp หมุน %kp"
+    //% block="tune turn Kp %kp"
     //% kp.defl=8.0
     //% group="Tune" weight=56
     export function tuneKpTurn(kp: number): void {
@@ -906,7 +906,7 @@ namespace JBCJoystick {
     /**
      * ส่ง Kd หมุน ไปให้หุ่น (default 0.5 — เพิ่มถ้า overshoot)
      */
-    //% block="ส่ง Kd หมุน %kd"
+    //% block="tune turn Kd %kd"
     //% kd.defl=0.5
     //% group="Tune" weight=55
     export function tuneKdTurn(kd: number): void {
