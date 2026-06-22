@@ -447,6 +447,7 @@ let _jbc_Kp_straight: number = 15.0
 let _jbc_Ki_straight: number = 0.01
 let _jbc_Kd_straight: number = 3.0
 let _jbc_Kp_turn: number = 8.0
+let _jbc_Ki_turn: number = 0.0
 let _jbc_Kd_turn: number = 0.5
 let _jbc_msperdeg: number = 6
 
@@ -497,8 +498,8 @@ namespace JBC {
                 let Kd: number
                 let iterm: number
                 if (_jbc_isTurning) {
-                    _jbc_integral = 0
-                    Kp = _jbc_Kp_turn; Kd = _jbc_Kd_turn; iterm = 0
+                    _jbc_integral = Math.constrain(_jbc_integral, -50, 50)
+                    Kp = _jbc_Kp_turn; Kd = _jbc_Kd_turn; iterm = _jbc_integral * _jbc_Ki_turn
                 } else {
                     _jbc_integral = Math.constrain(_jbc_integral, -50, 50)
                     Kp = _jbc_Kp_straight; Kd = _jbc_Kd_straight; iterm = _jbc_integral * _jbc_Ki_straight
@@ -576,6 +577,7 @@ namespace JBC {
             else if (name == "ki_s") { _jbc_Ki_straight = value }
             else if (name == "kd_s") { _jbc_Kd_straight = value }
             else if (name == "kp_t") { _jbc_Kp_turn = value }
+            else if (name == "ki_t") { _jbc_Ki_turn = value }
             else if (name == "kd_t") { _jbc_Kd_turn = value }
         })
     }
@@ -757,11 +759,12 @@ namespace JBC {
      * @param kp eg: 8.0
      * @param kd eg: 0.5
      */
-    //% block="ตั้ง PD หมุน|Kp %kp Kd %kd"
-    //% kp.defl=8.0 kd.defl=0.5
+    //% block="ตั้ง PID หมุน|Kp %kp Ki %ki Kd %kd"
+    //% kp.defl=8.0 ki.defl=0.0 kd.defl=0.5
     //% group="Tuning" weight=44
-    export function setTurnPD(kp: number, kd: number): void {
+    export function setTurnPID(kp: number, ki: number, kd: number): void {
         _jbc_Kp_turn = kp
+        _jbc_Ki_turn = ki
         _jbc_Kd_turn = kd
     }
 
@@ -904,11 +907,21 @@ namespace JBCJoystick {
     }
 
     /**
+     * ส่ง Ki หมุน ไปให้หุ่น (default 0.0)
+     */
+    //% block="จูน Ki หมุน %ki"
+    //% ki.defl=0.0
+    //% group="Tune" weight=55
+    export function tuneKiTurn(ki: number): void {
+        radio.sendValue("ki_t", ki)
+    }
+
+    /**
      * ส่ง Kd หมุน ไปให้หุ่น (default 0.5 — เพิ่มถ้า overshoot)
      */
     //% block="จูน Kd หมุน %kd"
     //% kd.defl=0.5
-    //% group="Tune" weight=55
+    //% group="Tune" weight=54
     export function tuneKdTurn(kd: number): void {
         radio.sendValue("kd_t", kd)
     }
